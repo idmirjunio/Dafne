@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Auto YT Audio Downloader",
+  "version": "0.1.0",
+  "description": "Baixa automaticamente áudio do YouTube usando Shira",
+
+  "permissions": [
+    "storage", 
+    "nativeMessaging"
+  ],
+
+  "host_permissions": [
+    "*://www.youtube.com/*"
+  ],
+
+  "action": {
+    "default_popup": "popup.html"
+  },
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["*://www.youtube.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
