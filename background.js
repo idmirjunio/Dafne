@@ -1,54 +1,56 @@
-const NATIVE_HOST_NAME = "com.meu_plugin";
+import './config.js';
 
-let heartbeatInterval = null;
-let port = null;
+const NOME_DO_HOST = "com.meu_plugin";
+
+let verificadorDeDownloadsPendentes = null;
+let porta = null;
 let nextRequestId = 1;
-const pendingRequests = new Map();
+const requestsPendentes = new Map();
 
 /* ===============================
    Conexao com Native Host
 ================================ */
 
-function getNativePort() {
-  if (port) return port;
+function getPorta() {
+  if (porta) return porta;
 
-  port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
+  porta = chrome.runtime.connectNative(NOME_DO_HOST);
 
-  port.onMessage.addListener(onNativeMessage);
+  porta.onMessage.addListener(onNativeMessage);
 
-  port.onDisconnect.addListener(() => {
-    const err = chrome.runtime.lastError?.message || "Native host desconectado";
-    console.error("[Native] desconectado:", err);
+  porta.onDisconnect.addListener(() => {
+    const falha = chrome.runtime.lastError?.message || "Native host desconectado";
+    console.error("[Native] desconectado:", falha);
 
-    for (const [requestId, request] of pendingRequests.entries()) {
+    for (const [requestId, request] of requestsPendentes.entries()) {
       const response = {
         ok: false,
         status: "error",
-        error: err,
+        error: falha,
         videoId: request.videoId,
         taskId: request.taskId
       };
 
       respondOnce(request, response);
 
-      if (request.started && request.expectFinal) {
+      if (request.iniciados && request.pendentes) {
         notifyTab(request.tabId, {
           type: "DOWNLOAD_COMPLETE",
           videoId: request.videoId,
           taskId: request.taskId,
           status: "error",
-          error: err
+          error: falha
         });
       }
 
       cleanupRequest(requestId);
     }
 
-    port = null;
+    porta = null;
   });
 
-  startHeartbeat();
-  return port;
+  iniciarVerificadorDeDownloadsPendentes();
+  return porta;
 }
 
 /* ===============================
@@ -81,7 +83,7 @@ function onNativeMessage(message) {
     return;
   }
 
-  const request = pendingRequests.get(requestId);
+  const request = requestsPendentes.get(requestId);
 
   if (!request) {
     console.warn(`Resposta sem request pendente para requestId ${requestId}:`, message);
@@ -110,14 +112,14 @@ function onNativeMessage(message) {
 
   respondOnce(request, response);
 
-  if (status === "started" && request.expectFinal) {
-    request.started = true;
+  if (status === "iniciados" && request.pendentes) {
+    request.iniciados = true;
     clearRequestTimeout(request);
     return;
   }
 
   if (isFinalDownloadStatus(status)) {
-    if (request.expectFinal && (request.started || hadAlreadyResponded)) {
+    if (request.pendentes && (request.iniciados || hadAlreadyResponded)) {
       notifyTab(request.tabId, {
         type: "DOWNLOAD_COMPLETE",
         videoId: response.videoId,
@@ -143,8 +145,8 @@ function respondOnce(request, response) {
 
   try {
     request.sendResponse(response);
-  } catch (err) {
-    console.error("Erro ao responder ao content script:", err);
+  } catch (falha) {
+    console.error("Erro ao responder ao content script:", falha);
   }
 }
 
@@ -156,9 +158,9 @@ function clearRequestTimeout(request) {
 }
 
 function cleanupRequest(requestId) {
-  const request = pendingRequests.get(requestId);
+  const request = requestsPendentes.get(requestId);
   if (request) clearRequestTimeout(request);
-  pendingRequests.delete(requestId);
+  requestsPendentes.delete(requestId);
 }
 
 function notifyTab(tabId, message) {
@@ -187,30 +189,29 @@ function notifyContentScript(message) {
 }
 
 /* ===============================
-   Heartbeat
+   Verificação de downloads pendentes
 ================================ */
 
-function startHeartbeat() {
-  if (heartbeatInterval) return;
+function iniciarVerificadorDeDownloadsPendentes() {
+  if (verificadorDeDownloadsPendentes) return; /*proteção de encadeamento*/ /* TO DO: verificar proteção contra reentrância */
 
-  heartbeatInterval = setInterval(() => {
-    const activeDownloads = Array.from(pendingRequests.values())
-      .filter((request) => request.expectFinal && request.started)
-      .length;
+  verificadorDeDownloadsPendentes = setInterval(() => {
+    
+    const downloadsPendentes = Array.from(requestsPendentes.values()).filter((requestAtual) => requestAtual.pendentes && requestAtual.iniciados).length;
 
-    if (activeDownloads === 0) return;
+    if (downloadsPendentes === 0) return;
 
-    console.log(`Downloads ativos: ${activeDownloads}`);
-
-    sendToNative(
-      { action: "PING" },
-      (response) => {
-        if (!response || response.status !== "pong") {
+    console.log(`Downloads ativos: ${downloadsPendentes}`);
+ 
+    enviar (
+      {action: "PING"},
+      (resposta) => {  
+        if (!resposta || resposta.status !== "pong") {
           console.error("Native host nao respondeu ao ping");
         }
       },
       {
-        expectFinal: false,
+        pendentes: false,
         timeout: 5000
       }
     );
@@ -218,32 +219,32 @@ function startHeartbeat() {
 }
 
 chrome.runtime.onStartup.addListener(() => {
-  startHeartbeat();
+  iniciarVerificadorDeDownloadsPendentes();
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  startHeartbeat();
+  iniciarVerificadorDeDownloadsPendentes();
 });
 
 /* ===============================
    Envio generico
 ================================ */
 
-function sendToNative(payload, sendResponse, options = {}) {
+function enviar (payload, sendResponse, options = {}) {
   const requestId = nextRequestId++;
   const videoId = options.videoId || payload.payload?.videoId;
   const taskId = options.taskId || payload.taskId;
   const timeout = options.timeout ?? 30000;
 
-  let nativePort;
+  let nativeporta;
 
   try {
-    nativePort = getNativePort();
-  } catch (err) {
+    nativeporta = getPorta();
+  } catch (falha) {
     sendResponse({
       ok: false,
       status: "error",
-      error: err.message,
+      error: falha.message,
       videoId,
       taskId
     });
@@ -258,14 +259,14 @@ function sendToNative(payload, sendResponse, options = {}) {
     tabId: options.tabId,
     videoId,
     taskId,
-    expectFinal: options.expectFinal ?? false,
+    pendentes: options.pendentes ?? false,
     responded: false,
-    started: false,
+    iniciados: false,
     timeoutId: null
   };
 
   request.timeoutId = setTimeout(() => {
-    if (!pendingRequests.has(requestId)) return;
+    if (!requestsPendentes.has(requestId)) return;
 
     const response = {
       ok: false,
@@ -277,7 +278,7 @@ function sendToNative(payload, sendResponse, options = {}) {
 
     respondOnce(request, response);
 
-    if (request.started && request.expectFinal) {
+    if (request.iniciados && request.pendentes) {
       notifyTab(request.tabId, {
         type: "DOWNLOAD_COMPLETE",
         videoId,
@@ -290,16 +291,16 @@ function sendToNative(payload, sendResponse, options = {}) {
     cleanupRequest(requestId);
   }, timeout);
 
-  pendingRequests.set(requestId, request);
+  requestsPendentes.set(requestId, request);
 
   try {
-    nativePort.postMessage(payload);
-  } catch (err) {
+    nativeporta.postMessage(payload);
+  } catch (falha) {
     cleanupRequest(requestId);
     sendResponse({
       ok: false,
       status: "error",
-      error: err.message,
+      error: falha.message,
       videoId,
       taskId
     });
@@ -321,11 +322,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === "PING") {
-    sendToNative(
+    enviar(
       { action: "PING" },
       sendResponse,
       {
-        expectFinal: false,
+        pendentes: false,
         timeout: 5000
       }
     );
@@ -333,7 +334,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === "PROCESS_VIDEO") {
-    sendToNative(
+    enviar (
       {
         action: "PROCESS_VIDEO",
         payload: {
@@ -345,7 +346,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         tabId: sender.tab?.id,
         videoId: message.videoId,
         taskId: message.taskId,
-        expectFinal: true,
+        pendentes: true,
         timeout: 120000
       }
     );

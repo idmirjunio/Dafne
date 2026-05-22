@@ -3,6 +3,12 @@
   "name": "Auto YT Audio Downloader",
   "version": "0.1.0",
   "description": "Baixa automaticamente áudio do YouTube usando Shira",
+  "icons": {
+    "16": "icon/icon16.png",
+    "32": "icon/icon32.png",
+    "48": "icon/icon48.png",
+    "128": "icon/icon128.png"
+  },
 
   "permissions": [
     "storage", 
@@ -14,11 +20,19 @@
   ],
 
   "action": {
-    "default_popup": "popup.html"
+    "default_title": "Dafne",
+    "default_icon": {
+      "16": "icon/icon16.png",
+      "32": "icon/icon32.png",
+      "48": "icon/icon48.png",
+      "128": "icon/icon128.png"
+    }
   },
 
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
+
   },
 
   "content_scripts": [
